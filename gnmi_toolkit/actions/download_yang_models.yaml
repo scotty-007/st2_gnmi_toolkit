@@ -1,0 +1,48 @@
+---
+name: download_yang_models
+pack: gnmi_toolkit
+runner_type: python-script
+description: Download all YANG models from a network device via NETCONF
+enabled: true
+entry_point: download_yang_models.py
+parameters:
+  host:
+    type: string
+    required: true
+    description: Device hostname or IP
+    
+  port:
+    type: integer
+    default: 830
+    description: NETCONF port
+    
+  username:
+    type: string
+    required: true
+    description: NETCONF username
+    
+  password:
+    type: string
+    required: true
+    secret: true
+    description: NETCONF password
+    
+  storage_path:
+    type: string
+    required: false
+    description: Where to save YANG files (default /opt/stackstorm/packs/gnmi_toolkit/yang_models/<host>)
+    
+  workers:
+    type: integer
+    default: 10
+    description: Number of concurrent download threads
+    
+  max_retries:
+    type: integer
+    default: 3
+    description: Retry attempts per module
+    
+  hostkey_verify:
+    type: boolean
+    default: false
+    description: Verify SSH host keys
