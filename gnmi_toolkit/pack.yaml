@@ -1,0 +1,13 @@
+---
+ref: gnmi_toolkit
+name: gNMI Toolkit
+description: Network automation toolkit for gNMI and NETCONF with YANG model management
+keywords:
+  - gnmi
+  - netconf
+  - yang
+version: 0.1.0
+python_versions:
+  - "3"
+author: Scott MacKenzie
+email: cartermackenzie.3@gmail.com
