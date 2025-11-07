@@ -1,0 +1,27 @@
+name: yang_parse_models
+pack: gnmi_toolkit
+runner_type: python-script
+description: Parse YANG models using pyang library and log detailed results
+enabled: true
+entry_point: yang_parse_models.py
+parameters:
+  device_name:
+    type: string
+    required: true
+    description: Device identifier (e.g., "192.168.1.50")
+    
+  yang_path:
+    type: string
+    required: false
+    description: |
+      Path to YANG files (default: /opt/stackstorm/packs/gnmi_toolkit/yang_models/<device>/raw)
+    
+  workers:
+    type: integer
+    default: 10
+    description: Number of concurrent parsing workers (1-20)
+    
+  store_in_datastore:
+    type: boolean
+    default: true
+    description: Store parsed paths in StackStorm datastore for later use

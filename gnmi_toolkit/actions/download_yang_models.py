@@ -4,10 +4,15 @@
 from st2common.runners.base_action import Action
 from ncclient import manager
 import os
+import sys
 import json
 import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Add lib to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib'))
+from pack_utils import get_yang_models_path, generate_pack_name
 
 
 class YangDownloadModelsAction(Action):
@@ -18,14 +23,19 @@ class YangDownloadModelsAction(Action):
         
         start_time = time.time()
         
-        # Setup storage path these models will download in the 
-        # pack file in the container. This can be confusing if 
-        # environment has a packs.dev folder.
-        if not storage_path:
-            storage_path = f"/opt/stackstorm/packs/gnmi_toolkit/yang_models/{host}"
+        start_time = time.time()
         
+        # Setup storage path - creates device pack directory structure
+        if not storage_path:
+            storage_path = get_yang_models_path(host)
+        
+        # Create directory structure (pack skeleton without metadata)
         os.makedirs(storage_path, exist_ok=True)
         
+        pack_name = generate_pack_name(host)
+        self.logger.info(f"Device pack: {pack_name}")
+        self.logger.info(f"Storing YANG models in: {storage_path}")
+
         # Connect and get list of available schemas
         self.logger.info(f"Connecting to {host}:{port}...")
         try:
@@ -109,6 +119,20 @@ class YangDownloadModelsAction(Action):
             'failed': len(failed),
             'duration_seconds': round(duration, 2)
         })
+
+    def _generate_pack_name(self, host):
+        """
+        Generate pack name from host
+    
+        Args:
+            host: Device hostname/IP (e.g., '192.168.1.50')
+    
+        Returns:
+            str: Pack name (e.g., 'device_192_168_1_50')
+        """
+        # Clean the host name: replace dots and dashes with underscores
+        clean_name = host.replace('.', '_').replace('-', '_')
+        return f"device_{clean_name}"
     
     def _download_concurrent(self, module_list, conn_params, storage_path, workers, max_retries):
         """Download modules using thread pool"""
@@ -159,7 +183,8 @@ class YangDownloadModelsAction(Action):
                     
                     filepath = os.path.join(storage_path, f"{module_name}.yang")
                     with open(filepath, 'w') as f:
-                        f.write(schema.data)
+                        cleaned_content = self._clean_yang_content(schema.data)
+                        f.write(cleaned_content)
                     
                     return {'module': module_name, 'success': True}
                     
@@ -171,3 +196,26 @@ class YangDownloadModelsAction(Action):
                     time.sleep(2 ** (retries - 1))  # 1s, 2s, 4s
         
         return {'module': module_name, 'success': False, 'error': last_error}
+
+
+    def _clean_yang_content(self, content):
+        """
+        Remove quotes from YANG keywords
+    
+        Some devices (Arista) return YANG with quoted keywords which pyang can't parse
+        Example: module "name" → module name
+        """
+        import re
+    
+        patterns = [
+            (r'module\s+"([^"]+)"', r'module \1'),
+            (r'import\s+"([^"]+)"', r'import \1'),
+            (r'prefix\s+"([^"]+)"', r'prefix \1'),
+            (r'yang-version\s+"([^"]+)"', r'yang-version \1'),
+            (r'namespace\s+"([^"]+)"', r'namespace "\1"'),  # Keep namespace quoted
+        ]
+    
+        for pattern, replacement in patterns:
+            content = re.sub(pattern, replacement, content)
+    
+        return content
