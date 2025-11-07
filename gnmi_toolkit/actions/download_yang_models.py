@@ -22,9 +22,7 @@ class YangDownloadModelsAction(Action):
         """Download all YANG models from device via NETCONF"""
         
         start_time = time.time()
-        
-        start_time = time.time()
-        
+                
         # Setup storage path - creates device pack directory structure
         if not storage_path:
             storage_path = get_yang_models_path(host)
