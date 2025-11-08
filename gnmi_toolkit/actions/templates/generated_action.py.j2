@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+# AUTO-GENERATED ACTION - DO NOT EDIT MANUALLY
+# Generated: {{ generated_timestamp }}
+# Device: {{ device }}
+# Module: {{ module }}
+# Container: {{ container_path }}
+from st2common.runners.base_action import Action
+from pygnmi.client import gNMIclient
+from datetime import datetime
+class {{ class_name }}(Action):
+    """
+    Auto-generated action for {{ module }}
+    Container: {{ container_path }}
+    
+    This action performs gNMI operations on the specified container path.
+    """
+    
+    # Action metadata
+    DEVICE = "{{ device }}"
+    MODULE = "{{ module }}"
+    CONTAINER_PATH = "{{ container_path }}"
+    
+    def run(self, device, operation, gnmi_port=6030, gnmi_username='admin', 
+            gnmi_password='admin', gnmi_insecure=True, **kwargs):
+        """
+        Execute gNMI operation on device
+        
+        Args:
+            device: Device hostname or IP
+            operation: gNMI operation (get, update, replace, delete)
+            gnmi_port: gNMI port (default: 6030)
+            gnmi_username: gNMI username (default: admin)
+            gnmi_password: gNMI password (default: admin)
+            gnmi_insecure: Skip TLS verification (default: True)
+            **kwargs: Container-specific parameters
+        
+        Returns:
+            tuple: (success: bool, result: dict)
+        """
+        try:
+            # Get device credentials (override with provided params)
+            host, port, username, password, insecure = self._get_credentials(
+                device, gnmi_port, gnmi_username, gnmi_password, gnmi_insecure)
+            
+            # Execute operation
+            if operation == 'get':
+                result = self._execute_get(host, port, username, password, insecure)
+            
+            elif operation in ['update', 'replace']:
+                result = self._execute_set(host, port, username, password, insecure,
+                                          kwargs, operation)
+            
+            elif operation == 'delete':
+                result = self._execute_delete(host, port, username, password, insecure)
+            
+            else:
+                return (False, {
+                    "success": False,
+                    "error": f"Unknown operation: {operation}",
+                    "timestamp": datetime.utcnow().isoformat() + 'Z'
+                })
+            
+            # Return workflow-optimized structure
+            return (True, {
+                "success": True,
+                "device": device,
+                "operation": operation,
+                "path": self.CONTAINER_PATH,
+                "module": self.MODULE,
+                "data": result,
+                "timestamp": datetime.utcnow().isoformat() + 'Z',
+                "parameters": kwargs
+            })
+        
+        except Exception as e:
+            self.logger.error(f"Action failed: {str(e)}")
+            return (False, {
+                "success": False,
+                "device": device,
+                "operation": operation,
+                "path": self.CONTAINER_PATH,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "timestamp": datetime.utcnow().isoformat() + 'Z'
+            })
+    
+    def _get_credentials(self, device, gnmi_port, gnmi_username, gnmi_password, gnmi_insecure):
+        """
+        Get device credentials from pack config or use provided parameters
+        
+        Args:
+            device: Device identifier
+            gnmi_port: Port provided as parameter
+            gnmi_username: Username provided as parameter
+            gnmi_password: Password provided as parameter
+            gnmi_insecure: Insecure flag provided as parameter
+        
+        Returns:
+            tuple: (host, port, username, password, insecure)
+        """
+        config = self.config
+        
+        # Check if device is in pack config
+        if config and 'devices' in config and device in config['devices']:
+            dev = config['devices'][device]
+            # Config takes precedence, but use provided params as fallback
+            return (
+                dev.get('host', device),
+                dev.get('port', gnmi_port),
+                dev.get('username', gnmi_username),
+                dev.get('password', gnmi_password),
+                dev.get('insecure', gnmi_insecure)
+            )
+        
+        # Use provided parameters
+        return (device, gnmi_port, gnmi_username, gnmi_password, gnmi_insecure)
+    
+    def _execute_get(self, host, port, username, password, insecure):
+        """
+        Execute gNMI Get operation
+        
+        Args:
+            host, port, username, password, insecure: Connection details
+        
+        Returns:
+            dict: gNMI Get response
+        """
+        with gNMIclient(target=(host, port), username=username,
+                       password=password, insecure=insecure) as gc:
+            return gc.get(path=[self.CONTAINER_PATH], encoding='JSON_IETF')
+    
+    def _execute_set(self, host, port, username, password, insecure, values, operation):
+        """
+        Execute gNMI Set operation (update or replace)
+        
+        Args:
+            host, port, username, password, insecure: Connection details
+            values: Dict of parameter values to set
+            operation: 'update' or 'replace'
+        
+        Returns:
+            dict: gNMI Set response
+        """
+        with gNMIclient(target=(host, port), username=username,
+                       password=password, insecure=insecure) as gc:
+            
+            # Build update/replace payload
+            updates = [{'path': self.CONTAINER_PATH, 'val': values}]
+            
+            if operation == 'update':
+                return gc.set(update=updates, encoding='JSON_IETF')
+            else:  # replace
+                return gc.set(replace=updates, encoding='JSON_IETF')
+    
+    def _execute_delete(self, host, port, username, password, insecure):
+        """
+        Execute gNMI Delete operation
+        
+        Args:
+            host, port, username, password, insecure: Connection details
+        
+        Returns:
+            dict: gNMI Set (delete) response
+        """
+        with gNMIclient(target=(host, port), username=username,
+                       password=password, insecure=insecure) as gc:
+            return gc.set(delete=[self.CONTAINER_PATH], encoding='JSON_IETF')

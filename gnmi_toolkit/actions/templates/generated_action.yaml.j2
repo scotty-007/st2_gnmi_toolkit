@@ -1,0 +1,89 @@
+# AUTO-GENERATED ACTION - DO NOT EDIT MANUALLY
+# Generated: {{ generated_timestamp }}
+# Device: {{ device }}
+# Module: {{ module }}
+# Container: {{ container_path }}
+name: {{ action_name }}
+pack: {{ pack_name }}
+runner_type: python-script
+description: "{{ description }}"
+enabled: true
+entry_point: {{ action_name }}.py
+parameters:
+  device:
+    type: string
+    required: true
+    description: "Device hostname or IP address"
+  
+  operation:
+    type: string
+    required: true
+    enum:
+      - get
+      - update
+      - replace
+      - delete
+    default: get
+    description: "gNMI operation to perform"
+  
+  gnmi_port:
+    type: integer
+    required: false
+    default: 6030
+    description: "gNMI port (default: 6030 for Arista, 57400 for others)"
+    minimum: 1
+    maximum: 65535
+  
+  gnmi_username:
+    type: string
+    required: false
+    default: "admin"
+    description: "gNMI username (default: admin)"
+  
+  gnmi_password:
+    type: string
+    required: false
+    default: "admin"
+    description: "gNMI password (default: admin)"
+    secret: true
+  
+  gnmi_insecure:
+    type: boolean
+    required: false
+    default: true
+    description: "Skip TLS certificate verification (default: true)"
+{% for param_name, param_spec in parameters.items() %}
+  
+  {{ param_name }}:
+    type: {{ param_spec.type }}
+{% if param_spec.required is defined %}
+    required: {{ param_spec.required | lower }}
+{% endif %}
+{% if param_spec.description is defined %}
+    description: "{{ param_spec.description | replace('"', '\\"') }}"
+{% endif %}
+{% if param_spec.default is defined %}
+{% if param_spec.type == 'boolean' %}
+    default: {{ param_spec.default | lower }}
+{% elif param_spec.type == 'string' %}
+    default: "{{ param_spec.default }}"
+{% else %}
+    default: {{ param_spec.default }}
+{% endif %}
+{% endif %}
+{% if param_spec.enum is defined %}
+    enum:
+{% for value in param_spec.enum %}
+      - {{ value }}
+{% endfor %}
+{% endif %}
+{% if param_spec.minimum is defined %}
+    minimum: {{ param_spec.minimum }}
+{% endif %}
+{% if param_spec.maximum is defined %}
+    maximum: {{ param_spec.maximum }}
+{% endif %}
+{% if param_spec.pattern is defined %}
+    pattern: "{{ param_spec.pattern | replace('\\', '\\\\') | replace('"', '\\"') }}"
+{% endif %}
+{% endfor %}

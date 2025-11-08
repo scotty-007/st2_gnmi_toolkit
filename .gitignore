@@ -1,0 +1,25 @@
+# ============================================================================
+# PACKS.DEV GITIGNORE
+# ============================================================================
+# --------------------------------------------------
+# Third-Party Packs (Not Maintained by Us)
+# --------------------------------------------------
+/network_automation
+/tests
+# --------------------------------------------------
+# Device-Specific Packs (Runtime Generated)
+# --------------------------------------------------
+# These are created dynamically per device
+device_*/
+# Alternative: If you want to track device pack structure but not data:
+# device_*/yang_models/
+# device_*/actions/generated/
+# --------------------------------------------------
+# Python Artifacts
+# --------------------------------------------------
+__pycache__/
+tests/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
