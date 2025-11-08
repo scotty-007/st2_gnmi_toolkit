@@ -1,9 +1,9 @@
-name: yang_generate_actions
+name: generate_yang_actions
 pack: gnmi_toolkit
 runner_type: python-script
 description: "Generate StackStorm actions from parsed YANG schema"
 enabled: true
-entry_point: yang_generate_actions.py
+entry_point: generate_yang_actions.py
 parameters:
   device_name:
     type: string

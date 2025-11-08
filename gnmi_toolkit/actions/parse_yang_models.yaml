@@ -1,9 +1,9 @@
-name: yang_parse_models
+name: parse_yang_models
 pack: gnmi_toolkit
 runner_type: python-script
 description: Parse YANG models using pyang library and log detailed results
 enabled: true
-entry_point: yang_parse_models.py
+entry_point: parse_yang_models.py
 parameters:
   device_name:
     type: string
