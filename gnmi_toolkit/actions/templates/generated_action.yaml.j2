@@ -19,12 +19,11 @@ parameters:
     type: string
     required: true
     enum:
-      - get
-      - update
-      - replace
-      - delete
+{% for op in supported_operations %}
+      - {{ op }}
+{% endfor %}
     default: get
-    description: "gNMI operation to perform"
+    description: "gNMI operation to perform{% if not is_writable %} (read-only container: only 'get' supported){% endif %}"
   
   gnmi_port:
     type: integer

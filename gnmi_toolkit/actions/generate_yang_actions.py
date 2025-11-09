@@ -91,11 +91,12 @@ class YangGenerateActionsAction(Action):
             # Group paths by container
             self.logger.info("Grouping paths into containers...")
             grouper = ContainerGrouper(yang_schema)
-            grouped = grouper.group_by_container(config_only=False, min_params=1)
+            grouped = grouper.group_by_container(min_params=1)
 
             summary = grouper.get_container_summary(grouped)
             self.logger.info(
                 f"Found {summary['total_containers']} containers "
+                f"({summary['config_containers']} config, {summary['state_containers']} state) "
                 f"in {summary['total_modules']} modules"
             )
 

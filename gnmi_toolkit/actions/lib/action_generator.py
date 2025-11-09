@@ -66,14 +66,27 @@ class ActionGenerator:
         if not parameters:
             return None
 
+        # Extract container type metadata
+        is_writable = container_data.get("is_writable", True)
+        container_type = container_data.get("container_type", "config")
+        supported_operations = container_data.get(
+            "supported_operations", ["get", "update", "replace", "delete"]
+        )
+
         # Build container description
-        description = self._build_description(module_name, container_path)
+        description = self._build_description(module_name, container_path, is_writable)
 
         # Build class name (PascalCase for Python class)
         class_name = self._build_class_name(action_name)
 
         # Render templates
         timestamp = datetime.utcnow().isoformat() + "Z"
+
+        is_writable = container_data.get("is_writable", True)
+        container_type = container_data.get("container_type", "config")
+        supported_operations = container_data.get(
+            "supported_operations", ["get", "update", "replace", "delete"]
+        )
 
         template_context = {
             "action_name": action_name,
@@ -85,6 +98,9 @@ class ActionGenerator:
             "parameters": parameters,
             "class_name": class_name,
             "generated_timestamp": timestamp,
+            "is_writable": is_writable,
+            "container_type": container_type,
+            "supported_operations": supported_operations,
         }
 
         # Render YAML
@@ -214,16 +230,21 @@ class ActionGenerator:
         parts = action_name.split("_")
         return "".join(word.capitalize() for word in parts)
 
-    def _build_description(self, module_name, container_path):
+    def _build_description(self, module_name, container_path, is_writable=True):
         """
-        Build human-readable description for action
+        Build human-readable description for action with operation hint
 
         Args:
             module_name: YANG module name
             container_path: Container path
+            is_writable: Whether container is writable (default: True)
 
         Returns:
-            str: Description
+            str: Description with operation hint
+
+        Examples:
+            (writable=True)  -> "Configure Openconfig Interfaces - Interface Config"
+            (writable=False) -> "Query Openconfig Interfaces - Interface State"
         """
         # Try to make it readable
         module_readable = module_name.replace("-", " ").replace("_", " ").title()
@@ -232,7 +253,10 @@ class ActionGenerator:
         path_parts = container_path.strip("/").split("/")
         context = " ".join(path_parts[-2:]).replace("-", " ").title()
 
-        return f"Configure {module_readable} - {context}"
+        # Use appropriate verb based on writability
+        operation_verb = "Configure" if is_writable else "Query"
+
+        return f"{operation_verb} {module_readable} - {context}"
 
     def _extract_parameters(self, paths):
         """

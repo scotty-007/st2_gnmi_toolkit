@@ -4,6 +4,8 @@
 # Device: {{ device }}
 # Module: {{ module }}
 # Container: {{ container_path }}
+# Container Type: {{ container_type }}
+# Writable: {{ is_writable }}
 from st2common.runners.base_action import Action
 from pygnmi.client import gNMIclient
 from datetime import datetime
@@ -11,14 +13,19 @@ class {{ class_name }}(Action):
     """
     Auto-generated action for {{ module }}
     Container: {{ container_path }}
+    Type: {{ container_type }} ({{ 'writable' if is_writable else 'read-only' }})
     
     This action performs gNMI operations on the specified container path.
+    Supported operations: {{ supported_operations | join(', ') }}
     """
     
     # Action metadata
     DEVICE = "{{ device }}"
     MODULE = "{{ module }}"
     CONTAINER_PATH = "{{ container_path }}"
+    IS_WRITABLE = {{ is_writable }}
+    CONTAINER_TYPE = "{{ container_type }}"
+    SUPPORTED_OPERATIONS = {{ supported_operations | tojson }}
     
     def run(self, device, operation, gnmi_port=6030, gnmi_username='admin', 
             gnmi_password='admin', gnmi_insecure=True, **kwargs):
@@ -27,7 +34,7 @@ class {{ class_name }}(Action):
         
         Args:
             device: Device hostname or IP
-            operation: gNMI operation (get, update, replace, delete)
+            operation: gNMI operation ({{ supported_operations | join(', ') }})
             gnmi_port: gNMI port (default: 6030)
             gnmi_username: gNMI username (default: admin)
             gnmi_password: gNMI password (default: admin)
@@ -38,6 +45,23 @@ class {{ class_name }}(Action):
             tuple: (success: bool, result: dict)
         """
         try:
+            # Validate operation is supported for this container type
+            if operation not in self.SUPPORTED_OPERATIONS:
+                error_msg = f"Operation '{operation}' not supported for {self.CONTAINER_TYPE} container"
+                if not self.IS_WRITABLE:
+                    error_msg += ". State containers are read-only and only support 'get' operation."
+                
+                return (False, {
+                    "success": False,
+                    "device": device,
+                    "operation": operation,
+                    "path": self.CONTAINER_PATH,
+                    "container_type": self.CONTAINER_TYPE,
+                    "error": error_msg,
+                    "supported_operations": self.SUPPORTED_OPERATIONS,
+                    "timestamp": datetime.utcnow().isoformat() + 'Z'
+                })
+            
             # Get device credentials (override with provided params)
             host, port, username, password, insecure = self._get_credentials(
                 device, gnmi_port, gnmi_username, gnmi_password, gnmi_insecure)
@@ -67,6 +91,7 @@ class {{ class_name }}(Action):
                 "operation": operation,
                 "path": self.CONTAINER_PATH,
                 "module": self.MODULE,
+                "container_type": self.CONTAINER_TYPE,
                 "data": result,
                 "timestamp": datetime.utcnow().isoformat() + 'Z',
                 "parameters": kwargs
@@ -79,6 +104,7 @@ class {{ class_name }}(Action):
                 "device": device,
                 "operation": operation,
                 "path": self.CONTAINER_PATH,
+                "container_type": self.CONTAINER_TYPE,
                 "error": str(e),
                 "error_type": type(e).__name__,
                 "timestamp": datetime.utcnow().isoformat() + 'Z'
