@@ -170,8 +170,23 @@ class {{ class_name }}(Action):
         with gNMIclient(target=(host, port), username=username,
                        password=password, insecure=insecure) as gc:
             
-            # Build update/replace payload
-            updates = [{'path': self.CONTAINER_PATH, 'val': values}]
+            # Filter out None/null values (user didn't provide them)
+            filtered_values = {k: v for k, v in values.items() if v is not None}
+            
+            # Skip if no values to set
+            if not filtered_values:
+                raise ValueError("No parameters provided. At least one parameter must be set.")
+            
+            # Convert to YANG format with namespace prefix
+            # 1. Convert underscores to hyphens (Python -> YANG naming)
+            # 2. Add module namespace prefix (required by device)
+            yang_values = {
+                f"{self.MODULE}:{k.replace('_', '-')}": v 
+                for k, v in filtered_values.items()
+            }
+
+            # Build update/replace payload as tuple (required by pygnmi)
+            updates = [(self.CONTAINER_PATH, yang_values)]
             
             if operation == 'update':
                 return gc.set(update=updates, encoding='JSON_IETF')
