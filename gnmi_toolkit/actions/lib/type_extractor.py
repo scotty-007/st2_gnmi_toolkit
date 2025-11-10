@@ -38,59 +38,58 @@ class TypeExtractor:
 
         # Extract type-specific information from resolved type statement
 
-        match type_name:
-            case "enumeration":
-                enum_stmts = resolved_type_stmt.search("enum")
-                if enum_stmts:
-                    type_info["enum"] = [e.arg for e in enum_stmts]
+        if type_name == "enumeration":
+            enum_stmts = resolved_type_stmt.search("enum")
+            if enum_stmts:
+                type_info["enum"] = [e.arg for e in enum_stmts]
 
-            case "union":
-                union_types = resolved_type_stmt.search("type")
-                if union_types:
-                    type_info["union_types"] = [t.arg for t in union_types]
+        elif type_name == "union":
+            union_types = resolved_type_stmt.search("type")
+            if union_types:
+                type_info["union_types"] = [t.arg for t in union_types]
 
-            case [
-                "int8",
-                "int16",
-                "int32",
-                "int64",
-                "uint8",
-                "uint16",
-                "uint32",
-                "uint64",
-            ]:
-                range_stmt = resolved_type_stmt.search_one("range")
-                if range_stmt:
-                    type_info["range"] = self._parse_range(range_stmt.arg)
+        elif type_name in [
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+        ]:
+            range_stmt = resolved_type_stmt.search_one("range")
+            if range_stmt:
+                type_info["range"] = self._parse_range(range_stmt.arg)
 
-            case "string":
-                length_stmt = resolved_type_stmt.search_one("length")
-                if length_stmt:
-                    type_info["length"] = self._parse_range(length_stmt.arg)
+        elif type_name == "string":
+            length_stmt = resolved_type_stmt.search_one("length")
+            if length_stmt:
+                type_info["length"] = self._parse_range(length_stmt.arg)
 
-                pattern_stmts = resolved_type_stmt.search("pattern")
-                if pattern_stmts:
-                    type_info["patterns"] = [p.arg for p in pattern_stmts]
+            pattern_stmts = resolved_type_stmt.search("pattern")
+            if pattern_stmts:
+                type_info["patterns"] = [p.arg for p in pattern_stmts]
 
-            case "leafref":
-                path_stmt = resolved_type_stmt.search_one("path")
-                if path_stmt:
-                    type_info["leafref_path"] = path_stmt.arg
+        elif type_name == "leafref":
+            path_stmt = resolved_type_stmt.search_one("path")
+            if path_stmt:
+                type_info["leafref_path"] = path_stmt.arg
 
-            case "identityref":
-                base_stmt = resolved_type_stmt.search_one("base")
-                if base_stmt:
-                    type_info["identity_base"] = base_stmt.arg
+        elif type_name == "identityref":
+            base_stmt = resolved_type_stmt.search_one("base")
+            if base_stmt:
+                type_info["identity_base"] = base_stmt.arg
 
-            case "decimal64":
-                fraction_stmt = resolved_type_stmt.search_one("fraction-digits")
-                if fraction_stmt:
-                    type_info["fraction_digits"] = int(fraction_stmt.arg)
+        elif type_name == "decimal64":
+            fraction_stmt = resolved_type_stmt.search_one("fraction-digits")
+            if fraction_stmt:
+                type_info["fraction_digits"] = int(fraction_stmt.arg)
 
-            case "bits":
-                bit_stmts = resolved_type_stmt.search("bit")
-                if bit_stmts:
-                    type_info["bits"] = [b.arg for b in bit_stmts]
+        elif type_name == "bits":
+            bit_stmts = resolved_type_stmt.search("bit")
+            if bit_stmts:
+                type_info["bits"] = [b.arg for b in bit_stmts]
 
         return type_info
 
