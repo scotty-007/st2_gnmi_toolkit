@@ -23,6 +23,7 @@ class YangGenerateActionsAction(Action):
         max_actions=0,
         register_actions=True,
         output_pack=None,
+        setup_virtualenv=True,
     ):
         """
         Generate StackStorm actions from parsed YANG schema
@@ -33,6 +34,7 @@ class YangGenerateActionsAction(Action):
             max_actions: Maximum actions to generate
             register_actions: Auto-register after generation (default: True)
             output_pack: Target pack (default: device pack)
+            setup_virtualenv: Setup virtualenv if needed (default: True)
 
         Returns:
             tuple: (success, result_dict)
@@ -160,24 +162,27 @@ class YangGenerateActionsAction(Action):
                 f"in {generation_time:.2f}s"
             )
 
-            # Register actions with StackStorm
-            if register_actions and generated_actions:
-                self.logger.info("Registering actions with StackStorm...")
-                try:
-                    result = subprocess.run(
-                        ["st2ctl", "reload", f"--register-pack={output_pack}"],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
+            # Setup virtual environment (MUST come before registration)
+            venv_result = {"success": True, "skipped": True}
+            if setup_virtualenv:
+                venv_result = self._setup_virtualenv(output_pack, pack_base_dir)
+
+                if not venv_result["success"] and not venv_result["skipped"]:
+                    self.logger.warning(
+                        f"Virtualenv setup failed: {venv_result['message']}. "
+                        f"Manual setup: st2 run packs.setup_virtualenv packs={output_pack}"
                     )
 
-                    if result.returncode == 0:
-                        self.logger.info("Actions registered successfully")
-                    else:
-                        self.logger.warning(f"Registration failed: {result.stderr}")
+            # Register actions with StackStorm (comes AFTER virtualenv)
+            registration_result = {"success": True, "action_count": 0}
+            if register_actions and generated_actions:
+                registration_result = self._register_pack(output_pack)
 
-                except Exception as e:
-                    self.logger.warning(f"Failed to register actions: {str(e)}")
+                if not registration_result["success"]:
+                    self.logger.warning(
+                        f"Registration failed: {registration_result['message']}. "
+                        f"Manual registration: st2 run packs.load packs={output_pack} register=actions"
+                    )
 
             # Build summary
             total_time = time.time() - start_time
@@ -202,7 +207,14 @@ class YangGenerateActionsAction(Action):
                     "total_containers": summary["total_containers"],
                     "generation_time_seconds": round(generation_time, 2),
                     "total_time_seconds": round(total_time, 2),
-                    "registered": register_actions,
+                    # Virtualenv info
+                    "virtualenv_setup": venv_result["success"],
+                    "virtualenv_skipped": venv_result.get("skipped", False),
+                    "virtualenv_message": venv_result.get("message", ""),
+                    # Registration info
+                    "registered": registration_result["success"],
+                    "registered_action_count": registration_result.get("action_count", 0),
+                    "registration_message": registration_result.get("message", ""),
                 },
             )
 
@@ -267,3 +279,174 @@ class YangGenerateActionsAction(Action):
                 f.write("\n".join(pack_yaml_content))
 
             self.logger.info(f"Created pack.yaml for {pack_name}")
+
+        # Create requirements.txt if it doesn't exist
+        requirements_path = os.path.join(pack_dir, "requirements.txt")
+        if not os.path.exists(requirements_path):
+            requirements_content = [
+                f"# Auto-generated requirements for pack: {pack_name}",
+                "ncclient",
+                "pygnmi",
+                "jinja2",
+                "",  # Trailing newline
+            ]
+
+            with open(requirements_path, "w") as f:
+                f.write("\n".join(requirements_content))
+
+            self.logger.info(f"Created requirements.txt for {pack_name}")
+        else:
+            self.logger.info(f"requirements.txt already exists for {pack_name}")
+
+    def _setup_virtualenv(self, pack_name, pack_dir):
+        """
+        Setup virtual environment using StackStorm's packs.setup_virtualenv action
+
+        Only creates virtualenv if:
+        - It doesn't already exist
+        - requirements.txt exists in pack
+
+        Args:
+            pack_name: Pack name (e.g., 'device_192_168_1_50')
+            pack_dir: Pack base directory
+
+        Returns:
+            dict: {'success': bool, 'message': str, 'skipped': bool}
+        """
+        venv_path = f"/opt/stackstorm/virtualenvs/{pack_name}"
+        requirements_path = os.path.join(pack_dir, "requirements.txt")
+
+        # Check if requirements.txt exists
+        if not os.path.exists(requirements_path):
+            self.logger.warning(
+                f"No requirements.txt found for {pack_name}. "
+                "Skipping virtualenv setup."
+            )
+            return {
+                "success": False,
+                "message": "No requirements.txt found",
+                "skipped": True,
+            }
+
+        # Check if virtualenv already exists
+        if os.path.exists(venv_path) and os.path.isdir(venv_path):
+            self.logger.info(
+                f"Virtual environment already exists for {pack_name}"
+            )
+            return {
+                "success": True,
+                "message": "Virtual environment already exists",
+                "skipped": True,
+            }
+
+        # Create virtualenv using StackStorm action
+        self.logger.info(f"Setting up virtual environment for {pack_name}...")
+        self.logger.info("This may take 1-2 minutes to install dependencies...")
+
+        try:
+            # Use st2 run to execute packs.setup_virtualenv action
+            result = subprocess.run(
+                ["st2", "run", "packs.setup_virtualenv", f"packs={pack_name}"],
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes
+            )
+
+            if result.returncode == 0:
+                self.logger.info(
+                    f"Virtual environment created successfully for {pack_name}"
+                )
+                return {
+                    "success": True,
+                    "message": "Virtual environment created successfully",
+                    "skipped": False,
+                }
+            else:
+                error_msg = result.stderr or result.stdout
+                self.logger.error(f"Virtualenv setup failed: {error_msg}")
+                return {
+                    "success": False,
+                    "message": f"Setup failed: {error_msg}",
+                    "skipped": False,
+                }
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("Virtualenv setup timed out")
+            return {
+                "success": False,
+                "message": "Setup timed out after 5 minutes",
+                "skipped": False,
+            }
+        except Exception as e:
+            self.logger.error(f"Virtualenv setup error: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Exception: {str(e)}",
+                "skipped": False,
+            }
+
+    def _register_pack(self, pack_name):
+        """
+        Register pack actions using StackStorm's packs.load action
+
+        Args:
+            pack_name: Pack name to register
+
+        Returns:
+            dict: {'success': bool, 'message': str, 'action_count': int}
+        """
+        self.logger.info(f"Registering actions for pack: {pack_name}")
+
+        try:
+            # Use packs.load with register=actions for granular control
+            result = subprocess.run(
+                ["st2", "run", "packs.load", f"packs={pack_name}", "register=actions"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if result.returncode == 0:
+                self.logger.info(f"Actions registered successfully for {pack_name}")
+
+                # Try to parse action count from output
+                action_count = 0
+                if "actions:" in result.stdout:
+                    try:
+                        # Output format: "actions: 13"
+                        import re
+
+                        match = re.search(r"actions:\s*(\d+)", result.stdout)
+                        if match:
+                            action_count = int(match.group(1))
+                    except:
+                        pass
+
+                return {
+                    "success": True,
+                    "message": "Actions registered successfully",
+                    "action_count": action_count,
+                }
+            else:
+                error_msg = result.stderr or result.stdout
+                self.logger.error(f"Registration failed: {error_msg}")
+                return {
+                    "success": False,
+                    "message": f"Registration failed: {error_msg}",
+                    "action_count": 0,
+                }
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("Registration timed out")
+            return {
+                "success": False,
+                "message": "Registration timed out after 60 seconds",
+                "action_count": 0,
+            }
+        except Exception as e:
+            self.logger.error(f"Registration error: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Exception: {str(e)}",
+                "action_count": 0,
+            }

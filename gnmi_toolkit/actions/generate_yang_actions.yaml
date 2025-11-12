@@ -32,3 +32,9 @@ parameters:
     type: string
     required: false
     description: "Target pack name (default: device_<device_name>)"
+  
+  setup_virtualenv:
+    type: boolean
+    required: false
+    default: true
+    description: "Automatically setup virtual environment for pack if it doesn't exist (runs packs.setup_virtualenv)"

@@ -69,3 +69,42 @@ def get_yang_models_path(device_identifier, base_path="/opt/stackstorm/packs.dev
     """
     pack_dir = get_pack_base_dir(device_identifier, base_path)
     return f"{pack_dir}/yang_models/raw"
+
+
+def get_virtualenv_path(pack_name, base_path="/opt/stackstorm/virtualenvs"):
+    """
+    Get full path to pack's virtual environment
+
+    Args:
+        pack_name: Pack name (e.g., 'device_192_168_1_50')
+        base_path: Base virtualenvs directory
+
+    Returns:
+        str: Full path to virtualenv directory
+
+    Example:
+        get_virtualenv_path('device_192_168_1_50')
+        -> '/opt/stackstorm/virtualenvs/device_192_168_1_50'
+    """
+    return f"{base_path}/{pack_name}"
+
+
+def check_virtualenv_exists(pack_name, base_path="/opt/stackstorm/virtualenvs"):
+    """
+    Check if virtual environment exists for pack
+
+    Args:
+        pack_name: Pack name
+        base_path: Base virtualenvs directory
+
+    Returns:
+        bool: True if virtualenv exists, False otherwise
+
+    Example:
+        check_virtualenv_exists('device_192_168_1_50')
+        -> True/False
+    """
+    import os
+
+    venv_path = get_virtualenv_path(pack_name, base_path)
+    return os.path.exists(venv_path) and os.path.isdir(venv_path)
