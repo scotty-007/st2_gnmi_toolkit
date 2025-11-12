@@ -27,6 +27,13 @@ class {{ class_name }}(Action):
     CONTAINER_TYPE = "{{ container_type }}"
     SUPPORTED_OPERATIONS = {{ supported_operations | tojson }}
     
+    # List key metadata
+    HAS_LIST_KEYS = {{ 'True' if has_list_keys else 'False' }}
+{% if has_list_keys %}
+    LIST_KEYS = {{ list_keys | tojson }}
+    LIST_PATH = "{{ list_path }}"
+{% endif %}
+    
     def run(self, device, operation, gnmi_port=6030, gnmi_username='admin', 
             gnmi_password='admin', gnmi_insecure=True, **kwargs):
         """
@@ -68,14 +75,30 @@ class {{ class_name }}(Action):
             
             # Execute operation
             if operation == 'get':
+{% if has_list_keys %}
+                path = self._build_dynamic_path(**kwargs)
+                result = self._execute_get(host, port, username, password, insecure, path)
+{% else %}
                 result = self._execute_get(host, port, username, password, insecure)
+{% endif %}
             
             elif operation in ['update', 'replace']:
+{% if has_list_keys %}
+                path = self._build_dynamic_path(**kwargs)
+                result = self._execute_set(host, port, username, password, insecure,
+                                          kwargs, operation, path)
+{% else %}
                 result = self._execute_set(host, port, username, password, insecure,
                                           kwargs, operation)
+{% endif %}
             
             elif operation == 'delete':
+{% if has_list_keys %}
+                path = self._build_dynamic_path(**kwargs)
+                result = self._execute_delete(host, port, username, password, insecure, path)
+{% else %}
                 result = self._execute_delete(host, port, username, password, insecure)
+{% endif %}
             
             else:
                 return (False, {
@@ -141,7 +164,53 @@ class {{ class_name }}(Action):
         # Use provided parameters
         return (device, gnmi_port, gnmi_username, gnmi_password, gnmi_insecure)
     
-    def _execute_get(self, host, port, username, password, insecure):
+{% if has_list_keys %}
+    def _build_dynamic_path(self, **kwargs):
+        """
+        Build gNMI path with list key values inserted at correct positions
+        
+        List keys are OPTIONAL:
+        - If all keys provided: /interface[name=Ethernet1]/neighbors/neighbor[id=1]
+        - If some keys omitted: /interface[name=Ethernet1]/neighbors/neighbor (all neighbors)
+        - If all keys omitted: /interface/neighbors/neighbor (all interfaces, all neighbors)
+        
+        Args:
+            **kwargs: Parameters including optional list key values
+        
+        Returns:
+            str: Dynamic path with list keys (only for provided keys)
+        """
+        path = self.CONTAINER_PATH
+        
+        # Group keys by their list_path (only for provided keys)
+        keys_by_list_path = {}
+        for key_info in self.LIST_KEYS:
+            param_name = key_info['name']
+            yang_name = key_info['yang_name']
+            list_path = key_info.get('list_path', self.LIST_PATH)
+            
+            # Skip if key not provided (allows querying all list elements)
+            if param_name not in kwargs or kwargs[param_name] is None:
+                continue
+            
+            key_value = kwargs[param_name]
+            
+            if list_path not in keys_by_list_path:
+                keys_by_list_path[list_path] = []
+            keys_by_list_path[list_path].append(f"{yang_name}={key_value}")
+        
+        # Replace each list path with its keyed version (only for lists with provided keys)
+        # Process from longest to shortest to handle nested lists correctly
+        for list_path in sorted(keys_by_list_path.keys(), key=len, reverse=True):
+            key_predicates = keys_by_list_path[list_path]
+            keyed_list_path = f"{list_path}[{']['.join(key_predicates)}]"
+            path = path.replace(list_path, keyed_list_path, 1)
+        
+        return path
+
+
+{% endif %}
+    def _execute_get(self, host, port, username, password, insecure{% if has_list_keys %}, path=None{% endif %}):
         """
         Execute gNMI Get operation
         
@@ -153,9 +222,14 @@ class {{ class_name }}(Action):
         """
         with gNMIclient(target=(host, port), username=username,
                        password=password, insecure=insecure) as gc:
+{% if has_list_keys %}
+            actual_path = path if path else self.CONTAINER_PATH
+            return gc.get(path=[actual_path], encoding='JSON_IETF')
+{% else %}
             return gc.get(path=[self.CONTAINER_PATH], encoding='JSON_IETF')
+{% endif %}
     
-    def _execute_set(self, host, port, username, password, insecure, values, operation):
+    def _execute_set(self, host, port, username, password, insecure, values, operation{% if has_list_keys %}, path=None{% endif %}):
         """
         Execute gNMI Set operation (update or replace)
         
@@ -163,6 +237,9 @@ class {{ class_name }}(Action):
             host, port, username, password, insecure: Connection details
             values: Dict of parameter values to set
             operation: 'update' or 'replace'
+{% if has_list_keys %}
+            path: Optional dynamic path with list keys
+{% endif %}
         
         Returns:
             dict: gNMI Set response
@@ -170,8 +247,17 @@ class {{ class_name }}(Action):
         with gNMIclient(target=(host, port), username=username,
                        password=password, insecure=insecure) as gc:
             
+{% if has_list_keys %}
+            # Filter out None/null values AND list keys (they go in path, not payload)
+            list_key_names = [k['name'] for k in self.LIST_KEYS]
+            filtered_values = {
+                k: v for k, v in values.items() 
+                if v is not None and k not in list_key_names
+            }
+{% else %}
             # Filter out None/null values (user didn't provide them)
             filtered_values = {k: v for k, v in values.items() if v is not None}
+{% endif %}
             
             # Skip if no values to set
             if not filtered_values:
@@ -186,23 +272,36 @@ class {{ class_name }}(Action):
             }
 
             # Build update/replace payload as tuple (required by pygnmi)
+{% if has_list_keys %}
+            actual_path = path if path else self.CONTAINER_PATH
+            updates = [(actual_path, yang_values)]
+{% else %}
             updates = [(self.CONTAINER_PATH, yang_values)]
+{% endif %}
             
             if operation == 'update':
                 return gc.set(update=updates, encoding='JSON_IETF')
             else:  # replace
                 return gc.set(replace=updates, encoding='JSON_IETF')
     
-    def _execute_delete(self, host, port, username, password, insecure):
+    def _execute_delete(self, host, port, username, password, insecure{% if has_list_keys %}, path=None{% endif %}):
         """
         Execute gNMI Delete operation
         
         Args:
             host, port, username, password, insecure: Connection details
+{% if has_list_keys %}
+            path: Optional dynamic path with list keys
+{% endif %}
         
         Returns:
             dict: gNMI Set (delete) response
         """
         with gNMIclient(target=(host, port), username=username,
                        password=password, insecure=insecure) as gc:
+{% if has_list_keys %}
+            actual_path = path if path else self.CONTAINER_PATH
+            return gc.set(delete=[actual_path], encoding='JSON_IETF')
+{% else %}
             return gc.set(delete=[self.CONTAINER_PATH], encoding='JSON_IETF')
+{% endif %}

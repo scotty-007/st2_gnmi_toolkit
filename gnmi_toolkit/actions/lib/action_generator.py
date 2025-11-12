@@ -59,11 +59,25 @@ class ActionGenerator:
         # Build action name
         action_name = self._build_action_name(device_name, module_name, container_path)
 
-        # Extract parameters from container paths
-        parameters = self._extract_parameters(container_data["paths"])
+        # Extract list key information if available
+        list_info = container_data.get("list_info", {})
+        raw_list_keys = list_info.get("keys", [])
 
-        # Skip if no parameters (shouldn't happen with min_params filter)
-        if not parameters:
+        # Handle duplicate list key names by renaming them
+        # Example: /evpn-instances/evpn-instance[name=X]/pseudowires/pseudowire[name=Y]
+        # Rename to: evpn_instance_name, pseudowire_name
+        list_keys_renamed = self._rename_duplicate_list_keys(
+            raw_list_keys, container_path
+        )
+        list_key_names = {key["name"] for key in list_keys_renamed}
+
+        # Extract parameters from container paths (excluding list keys)
+        parameters = self._extract_parameters(container_data["paths"], list_key_names)
+
+        # Skip if no parameters AND no list keys
+        # (containers with only list keys should still generate actions)
+        has_list_keys = bool(list_key_names)
+        if not parameters and not has_list_keys:
             return None
 
         # Extract container type metadata
@@ -88,6 +102,10 @@ class ActionGenerator:
             "supported_operations", ["get", "update", "replace", "delete"]
         )
 
+        # Use list key information already extracted and renamed above
+        has_list_keys = bool(list_keys_renamed)
+        list_path = list_info.get("list_path", "")
+
         template_context = {
             "action_name": action_name,
             "pack_name": pack_name,
@@ -101,6 +119,9 @@ class ActionGenerator:
             "is_writable": is_writable,
             "container_type": container_type,
             "supported_operations": supported_operations,
+            "has_list_keys": has_list_keys,
+            "list_keys": list_keys_renamed,
+            "list_path": list_path,
         }
 
         # Render YAML
@@ -262,7 +283,7 @@ class ActionGenerator:
 
         return f"{operation_verb} {module_readable} - {context}"
 
-    def _extract_parameters(self, paths):
+    def _extract_parameters(self, paths, list_key_names=None):
         """
         Extract StackStorm parameters from YANG paths
 
@@ -271,6 +292,7 @@ class ActionGenerator:
 
         Args:
             paths: Dict of {full_path: metadata}
+            list_key_names: Set of list key parameter names to exclude
 
         Returns:
             dict: {param_name: param_spec}
@@ -300,6 +322,7 @@ class ActionGenerator:
         }
 
         parameters = {}
+        list_key_names = list_key_names or set()
 
         for full_path, metadata in paths.items():
             # Extract leaf name (last part of path)
@@ -307,6 +330,10 @@ class ActionGenerator:
 
             # Convert YANG dashes to underscores for valid parameter names
             param_name = leaf_name.replace("-", "_")
+
+            # Skip if this parameter is a list key (will be added separately)
+            if param_name in list_key_names:
+                continue
 
             # Handle reserved parameter name conflicts
             if param_name in RESERVED_PARAMS:
@@ -321,3 +348,45 @@ class ActionGenerator:
             parameters[param_name] = param_spec
 
         return parameters
+
+    def _rename_duplicate_list_keys(self, list_keys, container_path):
+        """
+        Rename duplicate list key names to avoid conflicts
+
+        Example: /evpn-instances/evpn-instance[name]/pseudowires/pseudowire[name]
+        Both have "name" as key, so rename based on list container:
+        - evpn_instance_name
+        - pseudowire_name
+        """
+        if len(list_keys) <= 1:
+            return list_keys
+
+        # Check for duplicates
+        key_names = [key["name"] for key in list_keys]
+        if len(key_names) == len(set(key_names)):
+            # No duplicates
+            return list_keys
+
+        # Rename duplicates based on their list container name
+        renamed_keys = []
+        for key in list_keys:
+            if key_names.count(key["name"]) > 1:
+                # Duplicate - extract list container name from list_path
+                # /network-instances/network-instance → network_instance
+                # /vlans/vlan → vlan
+                list_path = key.get("list_path", "")
+                if list_path:
+                    list_container = list_path.rstrip("/").split("/")[-1]
+                    list_container_clean = list_container.replace("-", "_")
+                    new_name = f"{list_container_clean}_{key['name']}"
+
+                    renamed_key = key.copy()
+                    renamed_key["name"] = new_name
+                    renamed_key["original_name"] = key["name"]
+                    renamed_keys.append(renamed_key)
+                else:
+                    renamed_keys.append(key)
+            else:
+                renamed_keys.append(key)
+
+        return renamed_keys

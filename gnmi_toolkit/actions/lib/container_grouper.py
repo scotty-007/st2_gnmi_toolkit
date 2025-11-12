@@ -8,7 +8,7 @@ Organizes paths into actionable containers (e.g., /interfaces/interface/config)
 class ContainerGrouper:
     """Group YANG paths into logical containers for action generation"""
 
-    def __init__(self, yang_schema):
+    def __init__(self, yang_schema, list_registry=None):
         """
         Initialize with parsed YANG schema
 
@@ -22,6 +22,7 @@ class ContainerGrouper:
                 }
         """
         self.yang_schema = yang_schema
+        self.list_registry = list_registry or {}
 
     def group_by_container(self, min_params=1):
         """
@@ -69,6 +70,9 @@ class ContainerGrouper:
                         container_path, is_writable
                     )
 
+                    # Check if this container is under a list
+                    list_info = self._get_list_info(module_name, container_path)
+
                     module_containers[container_path] = {
                         "paths": {},
                         "param_count": 0,
@@ -77,17 +81,20 @@ class ContainerGrouper:
                         "supported_operations": self._get_supported_operations(
                             is_writable
                         ),
+                        "list_info": list_info,
                     }
 
                 # Add path to container
-                module_containers[container_path]["paths"][path] = metadata
-                module_containers[container_path]["param_count"] += 1
+                if not metadata.get("is_list_key", False):
+                    module_containers[container_path]["paths"][path] = metadata
+                    module_containers[container_path]["param_count"] += 1
 
             # Filter out containers with too few parameters
             filtered_containers = {
                 path: data
                 for path, data in module_containers.items()
                 if data["param_count"] >= min_params
+                or data.get("list_info", {}).get("is_list", False)
             }
 
             if filtered_containers:
@@ -116,10 +123,6 @@ class ContainerGrouper:
 
         # Need at least 2 parts (container + leaf)
         if len(parts) < 2:
-            return None
-
-        # Skip paths with list keys (contain brackets)
-        if "[" in full_path or "]" in full_path:
             return None
 
         # Container is everything except the last part (the leaf)
@@ -220,3 +223,52 @@ class ContainerGrouper:
             return ["get", "update", "replace", "delete"]
         else:
             return ["get"]  # Read-only: only get supported
+
+    def _get_list_info(self, module_name, container_path):
+        """
+        Get list metadata for a container path, including ALL ancestor lists
+
+        For nested lists like /network-instances/network-instance/vlans/vlan/config,
+        we need keys for BOTH parent lists:
+        - /network-instances/network-instance → key: name
+        - /network-instances/network-instance/vlans/vlan → key: vlan-id
+        """
+        module_lists = self.list_registry.get(module_name, {})
+
+        # Find ALL matching list paths (for nested lists)
+        matching_lists = []
+
+        for list_path, list_meta in module_lists.items():
+            if container_path.startswith(list_path + "/"):
+                matching_lists.append(
+                    {
+                        "list_path": list_path,
+                        "keys": list_meta["keys"],
+                        "length": len(list_path),
+                    }
+                )
+
+        if not matching_lists:
+            return {"is_list": False}
+
+        # Sort by length (shortest to longest) to build path correctly
+        matching_lists.sort(key=lambda x: x["length"])
+
+        # Combine all keys but preserve which list they belong to
+        all_keys = []
+        for match in matching_lists:
+            for key in match["keys"]:
+                # Add list_path to each key so we know where to insert it
+                key_with_path = key.copy()
+                key_with_path["list_path"] = match["list_path"]
+                all_keys.append(key_with_path)
+
+        # Use the longest (innermost) list path as the primary list path
+        innermost_list = matching_lists[-1]
+
+        return {
+            "is_list": True,
+            "list_path": innermost_list["list_path"],
+            "keys": all_keys,
+            "all_list_paths": [m["list_path"] for m in matching_lists],
+        }

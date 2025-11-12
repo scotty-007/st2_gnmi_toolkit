@@ -51,6 +51,33 @@ parameters:
     required: false
     default: true
     description: "Skip TLS certificate verification (default: true)"
+{% if has_list_keys %}
+  
+  # ===== LIST KEY PARAMETERS (OPTIONAL for querying all list elements) =====
+{% for key in list_keys %}
+  {{ key.name }}:
+    type: {{ 'integer' if key.type in ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64'] else 'string' }}
+    required: false
+    description: "{{ key.name.replace('_', ' ').title() }} (list key - optional: omit to query all {{ key.name }}s)"
+{% if key.type_info.get('enum') %}
+    enum:
+{% for value in key.type_info.enum %}
+      - {{ value }}
+{% endfor %}
+{% endif %}
+{% if key.type_info.get('range') and key.type_info.range.get('min') is not none %}
+    minimum: {{ key.type_info.range.min }}
+{% endif %}
+{% if key.type_info.get('range') and key.type_info.range.get('max') is not none %}
+    maximum: {{ key.type_info.range.max }}
+{% endif %}
+{% if key.type_info.get('patterns') %}
+    pattern: "{{ key.type_info.patterns[0] | replace('\\', '\\\\') | replace('"', '\\"') }}"
+{% endif %}
+{% endfor %}
+  
+  # ===== CONFIGURATION PARAMETERS (OPTIONAL) =====
+{% endif %}
 {% for param_name, param_spec in parameters.items() %}
   
   {{ param_name }}:

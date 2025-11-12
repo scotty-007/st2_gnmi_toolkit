@@ -14,6 +14,7 @@ class ASTWalker:
 
     def __init__(self):
         self.type_extractor = TypeExtractor()
+        self.list_registry = {}
 
     def extract_paths(self, pyang_module):
         """
@@ -52,10 +53,22 @@ class ASTWalker:
         current_path = path_stack + [node.arg]
         full_path = "/" + "/".join(current_path)
 
+        # Detect list nodes and extract key metadata
+        if node.keyword == "list":
+            list_info = self._extract_list_metadata(node, full_path)
+            if list_info:
+                self.list_registry[full_path] = list_info
+
         # Handle different node types
         if node.keyword == "leaf":
             # Leaf node - extract ALL leaves (config and state)
             leaf_info = self._extract_leaf_info(node)
+
+            # Mark if this leaf is a list key
+            if self._is_list_key(node):
+                leaf_info["is_list_key"] = True
+                leaf_info["list_path"] = self._find_parent_list_path(path_stack)
+
             if leaf_info:
                 paths[full_path] = leaf_info
 
@@ -150,3 +163,54 @@ class ASTWalker:
             info.update(type_info)
 
         return info
+
+    def _extract_list_metadata(self, list_node, list_path):
+        """Extract list key information from list node"""
+        key_stmt = list_node.search_one("key")
+        if not key_stmt:
+            return None
+
+        key_names = key_stmt.arg.split()
+        keys = []
+
+        for key_name in key_names:
+            for child in list_node.i_children:
+                if child.keyword == "leaf" and child.arg == key_name:
+                    type_stmt = child.search_one("type")
+                    type_info = (
+                        self.type_extractor.extract_type_info(type_stmt)
+                        if type_stmt
+                        else {}
+                    )
+
+                    keys.append(
+                        {
+                            "name": key_name.replace("-", "_"),
+                            "yang_name": key_name,
+                            "type": type_info.get("type", "string"),
+                            "type_info": type_info,
+                        }
+                    )
+                    break
+
+        if not keys:
+            return None
+
+        return {"list_path": list_path, "keys": keys}
+
+    def _is_list_key(self, leaf_node):
+        """Check if this leaf is a key for its parent list"""
+        parent = leaf_node.parent
+        if parent and parent.keyword == "list":
+            key_stmt = parent.search_one("key")
+            if key_stmt and leaf_node.arg in key_stmt.arg.split():
+                return True
+        return False
+
+    def _find_parent_list_path(self, path_stack):
+        """Find the path to the parent list"""
+        return "/" + "/".join(path_stack) if path_stack else None
+
+    def get_list_registry(self):
+        """Return collected list metadata"""
+        return self.list_registry

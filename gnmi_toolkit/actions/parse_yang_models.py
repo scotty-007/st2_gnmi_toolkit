@@ -45,7 +45,9 @@ class YangParseModelsAction(Action):
             self.logger.info(f"Extracting paths using {workers} concurrent workers...")
             parse_start = time.time()
 
-            path_catalog = self._parse_modules_concurrent(modules, workers)
+            path_catalog, list_registry = self._parse_modules_concurrent(
+                modules, workers
+            )
 
             parse_time = time.time() - parse_start
             total_paths = sum(data["path_count"] for data in path_catalog.values())
@@ -65,6 +67,18 @@ class YangParseModelsAction(Action):
                     key, json.dumps(path_catalog), ttl=None, encrypt=False
                 )
                 self.logger.info(f"Stored in datastore with key: {key}")
+
+            # Store list registry in datastore
+            if store_in_datastore and list_registry:
+                total_lists = sum(len(lists) for lists in list_registry.values())
+                self.logger.info(
+                    f"Storing {total_lists} lists from {len(list_registry)} modules..."
+                )
+                key_lists = f"device:{device_name}:yang_lists"
+                self.action_service.set_value(
+                    key_lists, json.dumps(list_registry), ttl=None, encrypt=False
+                )
+                self.logger.info(f"Stored list registry with key: {key_lists}")
 
             # Summary
             total_time = time.time() - start_time
@@ -123,57 +137,80 @@ class YangParseModelsAction(Action):
 
     def _parse_modules_concurrent(self, modules, workers):
         """
-        Parse modules concurrently using thread pool
+        Parse YANG modules concurrently using ThreadPoolExecutor
+
+        Uses concurrent processing to speed up parsing of multiple modules.
+        Each module is parsed independently in its own thread.
 
         Args:
             modules: Dict of {module_name: pyang_module}
-            workers: Number of concurrent workers
+            workers: Number of concurrent worker threads
 
         Returns:
-            dict: {module_name: {paths: {...}, path_count: N}}
+            tuple: (path_catalog, list_registry_all)
+                - path_catalog: Dict of {module_name: {'paths': {...}, 'path_count': N}}
+                - list_registry_all: Dict of {module_name: {list_path: metadata}}
         """
         path_catalog = {}
-        walker = ASTWalker()
+        list_registry_all = {}  # NEW
 
-        # Parse modules concurrently
+        def parse_module(module, module_name):
+            walker = ASTWalker()
+            paths = walker.extract_paths(module)
+            list_registry = walker.get_list_registry()
+            return (paths, list_registry)
+
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            # Submit all parsing tasks
             futures = {
-                executor.submit(walker.extract_paths, module): module_name
+                executor.submit(parse_module, module, module_name): module_name
                 for module_name, module in modules.items()
             }
 
             completed = 0
             total = len(modules)
 
-            # Collect results as they complete
             for future in as_completed(futures):
                 module_name = futures[future]
                 completed += 1
 
                 try:
-                    paths = future.result()
+                    paths, list_registry = future.result()
                     if paths:
                         path_catalog[module_name] = {
                             "paths": paths,
                             "path_count": len(paths),
                         }
 
-                        # Log progress every 10 modules
+                        if list_registry:
+                            list_registry_all[module_name] = list_registry
+
                         if completed % 10 == 0:
                             success_count = len(path_catalog)
+                            lists_count = len(list_registry_all)
                             self.logger.info(
                                 f"Progress: {completed}/{total} modules "
-                                f"({success_count} with paths)"
+                                f"({success_count} with paths, {lists_count} with lists)"
                             )
 
                 except Exception as e:
                     self.logger.warning(f"Failed to parse {module_name}: {str(e)}")
 
-        return path_catalog
+        return path_catalog, list_registry_all
 
     def _log_parse_statistics(self, path_catalog):
-        """Log statistics about parsed data"""
+        """
+        Log detailed statistics about parsed YANG data
+
+        Calculates and logs:
+        - Total modules and paths
+        - Config vs state path breakdown
+        - Average paths per module
+        - Top 10 modules by path count
+        - Validation metadata counts (enums, ranges)
+
+        Args:
+            path_catalog: Dict of {module_name: {'paths': {...}, 'path_count': N}}
+        """
 
         # Count statistics
         total_modules = len(path_catalog)
@@ -230,7 +267,29 @@ class YangParseModelsAction(Action):
             )
 
     def _build_sample_output(self, path_catalog):
-        """Build sample output for first 5 modules"""
+        """
+        Build sample output showing first 5 modules and their paths
+
+        Creates a condensed view of parsed data for action result output,
+        showing the first 5 modules with up to 5 sample paths each.
+
+        Args:
+            path_catalog: Dict of {module_name: {'paths': {...}, 'path_count': N}}
+
+        Returns:
+            list: Sample modules with format:
+                [
+                    {
+                        'module': 'openconfig-interfaces',
+                        'path_count': 42,
+                        'sample_paths': [
+                            {'path': '/interfaces/interface/config/enabled', 'type': 'boolean', ...},
+                            ...
+                        ]
+                    },
+                    ...
+                ]
+        """
         sample_modules = []
         for mod_name, mod_data in list(path_catalog.items())[:5]:
             # Get sample paths

@@ -71,6 +71,23 @@ class YangGenerateActionsAction(Action):
 
             yang_schema = json.loads(schema_json)
 
+            # Load list registry from datastore
+            key_lists = (
+                f"gnmi_toolkit.YangParseModelsAction:device:{device_name}:yang_lists"
+            )
+            lists_json = self.action_service.get_value(
+                name=key_lists, local=False, decrypt=False
+            )
+            list_registry = json.loads(lists_json) if lists_json else {}
+
+            if list_registry:
+                total_lists = sum(len(lists) for lists in list_registry.values())
+                self.logger.info(
+                    f"Loaded list registry: {total_lists} lists from {len(list_registry)} modules"
+                )
+            else:
+                self.logger.info("No list registry found (lists will be skipped)")
+
             total_modules = len(yang_schema)
             total_paths = sum(data["path_count"] for data in yang_schema.values())
 
@@ -90,7 +107,7 @@ class YangGenerateActionsAction(Action):
 
             # Group paths by container
             self.logger.info("Grouping paths into containers...")
-            grouper = ContainerGrouper(yang_schema)
+            grouper = ContainerGrouper(yang_schema, list_registry)
             grouped = grouper.group_by_container(min_params=1)
 
             summary = grouper.get_container_summary(grouped)
